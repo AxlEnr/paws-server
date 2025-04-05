@@ -12,6 +12,7 @@ from django.shortcuts import get_object_or_404
 from django.utils import timezone
 import logging
 from rest_framework.views import APIView
+from rest_framework.parsers import MultiPartParser, FormParser
 
 # User Views
 @api_view(['GET', 'POST'])
@@ -200,18 +201,16 @@ def pet_list(request):
     if request.method == 'GET':
         family_members = User.objects.filter(families__members=request.user).values_list('id', flat=True)
         pets = Pet.objects.filter(owner__in=[request.user.id] + list(family_members))
-        serializer = PetSerializer(pets, many=True)
+        serializer = PetSerializer(pets, many=True, context={'request': request})
         return Response(serializer.data)
     
     elif request.method == 'POST':
-        data = request.data.copy()
-        data['owner'] = request.user.id
-        serializer = PetSerializer(data=data)
+        serializer = PetSerializer(data=request.data, context={'request': request})
         if serializer.is_valid():
-            serializer.save()
+            serializer.save(owner=request.user)
             return Response(serializer.data, status=status.HTTP_201_CREATED)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-
+    
 @api_view(['GET', 'PUT', 'DELETE'])
 @authentication_classes([JWTAuthentication])
 @permission_classes([IsAuthenticated])

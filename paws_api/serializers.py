@@ -22,9 +22,31 @@ class FamilySerializer(serializers.ModelSerializer):
         fields = ['id', 'name', 'members', 'creation_date', 'codeFam']
 
 class PetSerializer(serializers.ModelSerializer):
+    photo_url = serializers.SerializerMethodField()
+    vaccines_url = serializers.SerializerMethodField()
+    pet_type_display = serializers.CharField(source='get_pet_type_display', read_only=True)
+
     class Meta:
         model = Pet
-        fields = ['id', 'owner', 'name', 'pet_type', 'age', 'breed', 'adoption_date', 'photo', 'vaccines']
+        fields = ['id', 'name', 'pet_type', 'pet_type_display', 'age', 'breed', 
+                 'adoption_date', 'photo', 'photo_url', 'vaccines', 'vaccines_url', 'owner']
+        read_only_fields = ('owner', 'photo_url', 'vaccines_url', 'pet_type_display')
+
+    def get_photo_url(self, obj):
+        if obj.photo:
+            request = self.context.get('request')
+            if request is not None:
+                return request.build_absolute_uri(obj.photo.url)
+            return obj.photo.url
+        return None
+
+    def get_vaccines_url(self, obj):
+        if obj.vaccines:
+            request = self.context.get('request')
+            if request is not None:
+                return request.build_absolute_uri(obj.vaccines.url)
+            return obj.vaccines.url
+        return None
 
 class PostImageSerializer(serializers.ModelSerializer):
     class Meta:

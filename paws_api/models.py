@@ -33,8 +33,10 @@ class Pet(models.Model):
     PET_TYPES = [
         ('DOG', 'Perro'),
         ('CAT', 'Gato'),
-        ('BIRD', 'Pájaro'),
+        ('BIRD', 'Ave'),
         ('FISH', 'Pez'),
+        ('RODENT', 'Roedor'),
+        ('REPTILE', 'Reptil'),
         ('OTHER', 'Otro'),
     ]
     
@@ -44,11 +46,23 @@ class Pet(models.Model):
     age = models.PositiveIntegerField(validators=[MinValueValidator(0), MaxValueValidator(50)])
     breed = models.CharField(max_length=100)
     adoption_date = models.DateField(null=True)
-    photo = models.URLField(blank=True, null=True)
-    vaccines = models.URLField(null=True)
+    photo = models.ImageField(upload_to='pets/photos/', null=True, blank=True)  # Cambiado de URLField a ImageField
+    vaccines = models.FileField(upload_to='pets/vaccines/', null=True, blank=True) 
     
     def __str__(self):
         return f"{self.name} ({self.get_pet_type_display()})"
+    
+    @property
+    def photo_url(self):
+        if self.photo:
+            return self.photo.url
+        return None
+    
+    @property
+    def vaccines_url(self):
+        if self.vaccines:
+            return self.vaccines.url
+        return None
 
 class Post(models.Model):
     POST_TYPES = [
