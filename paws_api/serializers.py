@@ -49,9 +49,52 @@ class PetSerializer(serializers.ModelSerializer):
         return None
 
 class PostImageSerializer(serializers.ModelSerializer):
+    photo_url = serializers.SerializerMethodField()
+    author_name = serializers.SerializerMethodField()
+    pet_name = serializers.SerializerMethodField()
+    
     class Meta:
         model = PostImage
-        fields = ['id', 'post', 'url', 'image_type', 'upload_date']
+        fields = [
+            'id', 
+            'photo', 
+            'photo_url',
+            'author', 
+            'author_name',
+            'pet', 
+            'pet_name',
+            'family',
+            'upload_date', 
+            'visibility', 
+            'caption',
+            'post'
+        ]
+        read_only_fields = ['author', 'upload_date']
+    
+    def get_photo_url(self, obj):
+        if obj.photo:
+            request = self.context.get('request')
+            return request.build_absolute_uri(obj.photo.url)
+        return None
+    
+    def get_author_name(self, obj):
+        return f"{obj.author.first_name} {obj.author.last_name}"
+    
+    def get_pet_name(self, obj):
+        return obj.pet.name if obj.pet else None
+    
+    def validate(self, data):
+        # Validar que el usuario pertenezca a la familia si se especifica
+        if 'family' in data and data['family']:
+            if not data['family'].members.filter(id=self.context['request'].user.id).exists():
+                raise serializers.ValidationError("No perteneces a esta familia")
+        
+        # Validar que la mascota pertenezca al usuario
+        if 'pet' in data and data['pet']:
+            if data['pet'].owner != self.context['request'].user:
+                raise serializers.ValidationError("No eres el dueño de esta mascota")
+        
+        return data
 
 class PostSerializer(serializers.ModelSerializer):
     images = PostImageSerializer(many=True, read_only=True)

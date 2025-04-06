@@ -36,8 +36,14 @@ def user_list(request):
 def signup_user(request):
     serializer = UserSerializer(data=request.data)
     if serializer.is_valid():
-        serializer.save()
-        return Response(serializer.data, status=status.HTTP_201_CREATED)
+        user = serializer.save()
+        return Response({
+            'id': user.id,  # Esto es crucial
+            'email': user.email,
+            'first_name': user.first_name,
+            'last_name': user.last_name,
+            'message': 'Usuario registrado exitosamente'
+        }, status=status.HTTP_201_CREATED)
     return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 # LOGIN Y GENERACIÓN DE TOKEN
@@ -194,11 +200,14 @@ def family_add_member(request, family_id):
     return Response({'status': 'member added'}, status=status.HTTP_200_OK)
 
 # Pet Views
-@api_view(['GET', 'POST'])
+# En views.py, modifica las vistas de mascotas (pet_list) y posts (post_list):
+
+@api_view(['GET', 'POST'])  # Asegúrate que incluya POST
 @authentication_classes([JWTAuthentication])
 @permission_classes([IsAuthenticated])
 def pet_list(request):
     if request.method == 'GET':
+        # Tu lógica existente para GET
         family_members = User.objects.filter(families__members=request.user).values_list('id', flat=True)
         pets = Pet.objects.filter(owner__in=[request.user.id] + list(family_members))
         serializer = PetSerializer(pets, many=True, context={'request': request})
@@ -210,6 +219,22 @@ def pet_list(request):
             serializer.save(owner=request.user)
             return Response(serializer.data, status=status.HTTP_201_CREATED)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+@api_view(['GET'])
+@authentication_classes([JWTAuthentication])
+@permission_classes([IsAuthenticated])
+def post_list(request):
+    user_family = request.user.families.first()
+    
+    if user_family:
+        # Posts de miembros de la familia
+        posts = Post.objects.filter(author__families=user_family)
+    else:
+        # Solo posts del usuario
+        posts = Post.objects.filter(author=request.user)
+    
+    serializer = PostSerializer(posts, many=True)
+    return Response(serializer.data)
     
 @api_view(['GET', 'PUT', 'DELETE'])
 @authentication_classes([JWTAuthentication])
@@ -233,32 +258,38 @@ def pet_detail(request, pet_id):
         pet.delete()
         return Response(status=status.HTTP_204_NO_CONTENT)
 
-# Post Views
-@api_view(['GET', 'POST'])
-@authentication_classes([JWTAuthentication])
-@permission_classes([IsAuthenticated])
-def post_list(request):
-    if request.method == 'GET':
-        # Obtener posts del usuario y de su familia
-        family_members = User.objects.filter(families__members=request.user).values_list('id', flat=True)
-        posts = Post.objects.filter(author__in=[request.user.id] + list(family_members))
-        serializer = PostSerializer(posts, many=True)
-        return Response(serializer.data)
+# En views.py
+# En views.py
+@api_view(['POST'])
+def setup_family(request):
+    user_id = request.data.get('user_id')
+    action = request.data.get('action')
     
-    elif request.method == 'POST':
-        data = request.data.copy()
-        data['author'] = request.user.id
-        serializer = PostSerializer(data=data)
-        if serializer.is_valid():
-            post = serializer.save()
-            
-            # Manejar imágenes si vienen en la solicitud
-            images = request.FILES.getlist('images')
-            for image in images:
-                PostImage.objects.create(post=post, image=image)
-            
-            return Response(serializer.data, status=status.HTTP_201_CREATED)
-        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+    try:
+        user = User.objects.get(id=user_id)
+    except User.DoesNotExist:
+        return Response({'error': 'Usuario no encontrado'}, status=404)
+    
+    if action == 'create':
+        family_name = request.data.get('name', 'Mi Familia')
+        family = Family.objects.create(
+            name=family_name,
+            codeFam=generate_unique_family_code()
+        )
+        family.members.add(user)
+        return Response({'status': 'family created', 'code': family.codeFam})
+    
+    elif action == 'join':
+        code = request.data.get('code')
+        try:
+            family = Family.objects.get(codeFam=code)
+            family.members.add(user)
+            return Response({'status': 'joined family'})
+        except Family.DoesNotExist:
+            return Response({'error': 'Código inválido'}, status=400)
+    
+    return Response({'error': 'Acción no válida'}, status=400)
+
 
 @api_view(['GET', 'PUT', 'DELETE'])
 @authentication_classes([JWTAuthentication])
@@ -430,3 +461,146 @@ def user_dashboard(request):
     }
     
     return Response(data)
+
+# Photo Views
+@api_view(['GET', 'POST'])
+@authentication_classes([JWTAuthentication])
+@permission_classes([IsAuthenticated])
+def photo_list(request):
+    if request.method == 'GET':
+        # Obtener fotos personales y familiares (si tiene familia)
+        family = request.user.families.first()
+        query = models.Q(author=request.user)
+        
+        if family:
+            query |= models.Q(family=family, visibility='FAMILY')
+            
+        photos = PostImage.objects.filter(query).order_by('-upload_date')
+        
+        serializer = PostImageSerializer(photos, many=True, context={'request': request})
+        return Response(serializer.data)
+    
+    elif request.method == 'POST':
+        data = request.data.copy()
+        data['author'] = request.user.id
+        
+        # Asignar familia automáticamente si no se especifica
+        if 'family' not in data:
+            family = request.user.families.first()
+            if family:
+                data['family'] = family.id
+        
+        serializer = PostImageSerializer(data=data, context={'request': request})
+        if serializer.is_valid():
+            serializer.save()
+            return Response(serializer.data, status=status.HTTP_201_CREATED)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+    
+@api_view(['GET', 'PUT', 'DELETE'])
+@authentication_classes([JWTAuthentication])
+@permission_classes([IsAuthenticated])
+def photo_detail(request, photo_id):
+    try:
+        # Obtener la foto verificando permisos
+        photo = PostImage.objects.get(id=photo_id)
+        
+        # Verificar permisos
+        if photo.author != request.user:
+            family = request.user.families.first()
+            if not family or photo.family != family or photo.visibility != 'FAMILY':
+                raise PermissionDenied("No tienes permiso para acceder a esta foto")
+                
+    except PostImage.DoesNotExist:
+        return Response(
+            {'error': 'Foto no encontrada'}, 
+            status=status.HTTP_404_NOT_FOUND
+        )
+    except PermissionDenied as e:
+        return Response(
+            {'error': str(e)}, 
+            status=status.HTTP_403_FORBIDDEN
+        )
+    
+    if request.method == 'GET':
+        serializer = PostImageSerializer(photo, context={'request': request})
+        return Response(serializer.data)
+    
+    elif request.method == 'PUT':
+        if photo.author != request.user:
+            return Response(
+                {'error': 'Solo el autor puede editar esta foto'},
+                status=status.HTTP_403_FORBIDDEN
+            )
+            
+        serializer = PostImageSerializer(
+            photo, 
+            data=request.data, 
+            partial=True, 
+            context={'request': request}
+        )
+        if serializer.is_valid():
+            serializer.save()
+            return Response(serializer.data)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+    
+    elif request.method == 'DELETE':
+        if photo.author != request.user:
+            return Response(
+                {'error': 'Solo el autor puede eliminar esta foto'},
+                status=status.HTTP_403_FORBIDDEN
+            )
+            
+        photo.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+@api_view(['GET'])
+@authentication_classes([JWTAuthentication])
+@permission_classes([IsAuthenticated])
+def personal_photos(request):
+    # Obtener solo fotos personales del usuario
+    photos = PostImage.objects.filter(
+        author=request.user, 
+        visibility='PERSONAL'
+    ).order_by('-upload_date')
+    
+    serializer = PostImageSerializer(photos, many=True, context={'request': request})
+    return Response(serializer.data)
+
+@api_view(['GET'])
+@authentication_classes([JWTAuthentication])
+@permission_classes([IsAuthenticated])
+def family_photos(request):
+    # Obtener fotos familiares
+    family = request.user.families.first()
+    if not family:
+        return Response([], status=status.HTTP_200_OK)
+        
+    photos = PostImage.objects.filter(
+        family=family, 
+        visibility='FAMILY'
+    ).order_by('-upload_date')
+    
+    serializer = PostImageSerializer(photos, many=True, context={'request': request})
+    return Response(serializer.data)
+
+@api_view(['GET'])
+@authentication_classes([JWTAuthentication])
+@permission_classes([IsAuthenticated])
+def pet_photos(request, pet_id):
+    # Verificar que la mascota pertenezca al usuario o su familia
+    try:
+        family_members = User.objects.filter(families__members=request.user).values_list('id', flat=True)
+        pet = Pet.objects.get(
+            id=pet_id, 
+            owner__in=[request.user.id] + list(family_members)
+        )
+    except Pet.DoesNotExist:
+        return Response(
+            {'error': 'Mascota no encontrada o no tienes permisos'},
+            status=status.HTTP_404_NOT_FOUND
+        )
+    
+    # Obtener fotos de la mascota
+    photos = PostImage.objects.filter(pet=pet).order_by('-upload_date')
+    serializer = PostImageSerializer(photos, many=True, context={'request': request})
+    return Response(serializer.data)

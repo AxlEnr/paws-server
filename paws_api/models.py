@@ -78,6 +78,7 @@ class Post(models.Model):
         ('DELETED', 'Eliminado'),
     ]
     
+    pet = models.ForeignKey(Pet, on_delete=models.SET_NULL, null=True, blank=True, related_name='posts')
     author = models.ForeignKey(User, on_delete=models.CASCADE, related_name='posts')
     content = models.TextField()
     created_at = models.DateTimeField(default=timezone.now)
@@ -88,19 +89,25 @@ class Post(models.Model):
         return f"Post by {self.author.email} at {self.created_at}"
 
 class PostImage(models.Model):
-    IMAGE_TYPES = [
-        ('PHOTO', 'Foto'),
-        ('VIDEO', 'Video'),
-        ('GIF', 'GIF'),
+    VISIBILITY_CHOICES = [
+        ('PERSONAL', 'Personal'),
+        ('FAMILY', 'Familia'),
     ]
     
-    post = models.ForeignKey(Post, on_delete=models.CASCADE, related_name='images')
-    url = models.URLField()
-    image_type = models.CharField(max_length=10, choices=IMAGE_TYPES)
+    post = models.ForeignKey(Post, on_delete=models.CASCADE, related_name='images', null=True, blank=True)
+    author = models.ForeignKey(User, on_delete=models.CASCADE, null=True, blank=True)
+    pet = models.ForeignKey(Pet, on_delete=models.CASCADE, related_name='images', null=True, blank=True)
+    family = models.ForeignKey(Family, on_delete=models.CASCADE, related_name='images', null=True, blank=True)
+    photo = models.ImageField(upload_to='posts/photos/', null=True, blank=True)
     upload_date = models.DateTimeField(default=timezone.now)
+    visibility = models.CharField(max_length=10, choices=VISIBILITY_CHOICES, default='FAMILY')
+    caption = models.TextField(blank=True, null=True)
     
     def __str__(self):
-        return f"Image for post {self.post.id}"
+        return f"Foto de {self.pet.name} subida por {self.author.first_name}"
+    
+    def __str__(self):
+        return f"Foto de {self.pet.name} subida por {self.author.first_name}"
 
 class Reminder(models.Model):
     REMINDER_TYPES = [
@@ -120,7 +127,7 @@ class Reminder(models.Model):
     pet = models.ForeignKey(Pet, on_delete=models.CASCADE, related_name='reminders')
     title = models.CharField(max_length=100)
     description = models.TextField()
-    due_date = models.DateTimeField(default=timezone.now())
+    due_date = models.DateTimeField(default=timezone.now)
     reminder_type = models.CharField(max_length=10, choices=REMINDER_TYPES)
     status = models.CharField(max_length=10, choices=REMINDER_STATUS, default='PENDING')
     

@@ -36,4 +36,12 @@ urlpatterns = [
     # Special endpoints
     path('create-pet-with-post/', views.create_pet_with_post, name='create_pet_with_post'),
     path('dashboard/', views.user_dashboard, name='user_dashboard'),
+
+    # Photo endpoints
+    path('photos/', views.photo_list, name='photo_list'),
+    path('photos/<int:photo_id>/', views.photo_detail, name='photo_detail'),
+    path('photos/personal/', views.personal_photos, name='personal_photos'),
+    path('photos/family/', views.family_photos, name='family_photos'),
+    path('photos/pet/<int:pet_id>/', views.pet_photos, name='pet_photos'),
+    path('families/setup/', views.setup_family, name='setup_family'),
 ]
