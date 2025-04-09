@@ -140,6 +140,27 @@ import string
 import random
 import secrets
 
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def check_family_status(request):
+    user = request.user
+    families = user.families.all()
+    
+    if families.exists():
+        family = families.first() 
+        return Response({
+            'has_family': True,
+            'family': {
+                'id': family.id,
+                'name': family.name,
+                'codeFam': family.codeFam
+            }
+        })
+    else:
+        return Response({
+            'has_family': False
+        })
+
 def generate_unique_family_code():
     while True:
         code = generate_secure_code()
@@ -159,6 +180,119 @@ def generate_secure_code():
     random.shuffle(secure_str)
     return ''.join(secure_str)
 
+
+@api_view(['POST'])
+@authentication_classes([JWTAuthentication])
+@permission_classes([IsAuthenticated])
+def family_create(request):
+    # Verificar si el usuario ya pertenece a una familia
+    if request.user.family_set.exists():
+        return Response(
+            {"error": "Ya perteneces a una familia. Debes salir de ella antes de crear una nueva."},
+            status=status.HTTP_400_BAD_REQUEST
+        )
+
+    # Validar que se proporcionó el nombre de la familia
+    name = request.data.get('name')
+    if not name:
+        return Response(
+            {"error": "Se requiere un nombre para la familia"},
+            status=status.HTTP_400_BAD_REQUEST
+        )
+
+    # Crear la familia con el nombre proporcionado y un código único
+    family = Family.objects.create(
+        name=name,
+        codeFam=generate_unique_family_code()
+    )
+    
+    # Añadir al usuario como miembro de la familia
+    family.members.add(request.user)
+    
+    serializer = FamilySerializer(family)
+    return Response(serializer.data, status=status.HTTP_201_CREATED)
+
+@api_view(['PUT'])
+@authentication_classes([JWTAuthentication])
+@permission_classes([IsAuthenticated])
+def family_join_by_code(request):
+    codeFam = request.data.get('codeFam')
+
+    if not codeFam:
+        return Response({'error': 'Se requiere un código de familia'}, status=status.HTTP_400_BAD_REQUEST)
+
+    user = request.user
+    try:
+        family = Family.objects.get(codeFam=codeFam)
+    except Family.DoesNotExist:
+        return Response({'error': 'Código de familia inválido'}, status=status.HTTP_404_NOT_FOUND)
+
+
+    if user in family.members.all():
+        return Response({'error': 'Ya perteneces a esta familia'}, status=status.HTTP_400_BAD_REQUEST)
+
+    family.members.add(user)
+    serializer = FamilySerializer(family)
+    return Response(serializer.data, status=status.HTTP_200_OK)
+
+
+@api_view(['POST'])
+@authentication_classes([JWTAuthentication])
+@permission_classes([IsAuthenticated])
+def family_setup(request):
+    action = request.data.get('action')
+    user = request.user
+    
+    if action == 'create':
+        name = request.data.get('name')
+        if not name:
+            return Response(
+                {"error": "Se requiere un nombre para la familia"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+            
+        if user.family_set.exists():
+            return Response(
+                {"error": "Ya perteneces a una familia. Debes salir de ella antes de crear una nueva."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+            
+        family = Family.objects.create(
+            name=name,
+            codeFam=generate_unique_family_code()
+        )
+        family.members.add(user)
+        
+    elif action == 'join':
+        code = request.data.get('code')
+        if not code:
+            return Response(
+                {"error": "Se requiere un código de familia"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+            
+        try:
+            family = Family.objects.get(codeFam=code)
+            if user in family.members.all():
+                return Response(
+                    {"error": "Ya perteneces a esta familia"},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+                
+            family.members.add(user)
+        except Family.DoesNotExist:
+            return Response(
+                {"error": "Código de familia inválido"},
+                status=status.HTTP_404_NOT_FOUND
+            )
+    else:
+        return Response(
+            {"error": "Acción no válida. Use 'create' o 'join'"},
+            status=status.HTTP_400_BAD_REQUEST
+        )
+    
+    serializer = FamilySerializer(family)
+    return Response(serializer.data, status=status.HTTP_200_OK)
 
 @api_view(['GET', 'PUT', 'DELETE'])
 @authentication_classes([JWTAuthentication])
@@ -202,13 +336,15 @@ def family_add_member(request, family_id):
 # Pet Views
 # En views.py, modifica las vistas de mascotas (pet_list) y posts (post_list):
 
-@api_view(['GET', 'POST'])  # Asegúrate que incluya POST
+# En tu views.py de Django
+@api_view(['GET', 'POST'])
 @authentication_classes([JWTAuthentication])
 @permission_classes([IsAuthenticated])
 def pet_list(request):
     if request.method == 'GET':
-        # Tu lógica existente para GET
+        # Obtener todos los miembros de la familia del usuario
         family_members = User.objects.filter(families__members=request.user).values_list('id', flat=True)
+        # Filtrar mascotas que pertenecen al usuario o a miembros de su familia
         pets = Pet.objects.filter(owner__in=[request.user.id] + list(family_members))
         serializer = PetSerializer(pets, many=True, context={'request': request})
         return Response(serializer.data)
@@ -219,7 +355,7 @@ def pet_list(request):
             serializer.save(owner=request.user)
             return Response(serializer.data, status=status.HTTP_201_CREATED)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-
+    
 @api_view(['GET'])
 @authentication_classes([JWTAuthentication])
 @permission_classes([IsAuthenticated])
