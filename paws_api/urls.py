@@ -7,12 +7,18 @@ urlpatterns = [
     path('users/', views.user_list, name='user_list'),
     path('users/<int:user_id>/', views.user_detail, name='user_detail'),
     path('users/login/', LoginView.as_view(), name='login'),
-    path('users/signup/', views.signup_user, name='signup_user'),
+    path('users/signup/', views.signup_user, name='signup_user'),   
     
     # Family endpoints
     path('families/', views.family_list, name='family_list'),
-    path('families/<int:family_id>/', views.family_detail, name='family_detail'),
+    path('families/<int:family_id>/', views.family_detail, name='family_detail'),   
     path('families/<int:family_id>/add-member/', views.family_add_member, name='family_add_member'),
+    path('families/setup/', views.family_setup, name='family-setup'),
+    path('families/<int:family_id>/', views.family_detail, name='family-detail'),
+    path('users/check-family/', views.check_family_status, name='check-family-status'),
+    path('families/join/', views.family_join_by_code, name='family-join-by-code'),
+
+    
     
     # Pet endpoints
     path('pets/', views.pet_list, name='pet_list'),
