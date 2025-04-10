@@ -62,14 +62,18 @@ class LoginView(APIView):
         except User.DoesNotExist:
             return Response({"error": "Invalid credentials"}, status=status.HTTP_400_BAD_REQUEST)
 
-
         refresh = RefreshToken.for_user(user)
         user_data = UserSerializer(user).data
+
+        # Obtener el family_id
+        family = user.families.first()
+        family_id = family.id if family else -1
 
         return Response({
             "refresh": str(refresh),
             "access": str(refresh.access_token),
-            "user": user_data 
+            "user": user_data,
+            "family_id": family_id  # Añadimos el family_id a la respuesta
         }, status=status.HTTP_200_OK)
 
 #OBTENER USUARIO DE LA SESIÓN ACTUAL
@@ -199,6 +203,14 @@ def family_create(request):
             {"error": "Se requiere un nombre para la familia"},
             status=status.HTTP_400_BAD_REQUEST
         )
+
+    
+    if request.user.family_set.exists():
+        return Response(
+            {"error": "Ya perteneces a una familia. Debes salir de ella antes de crear una nueva."},
+            status=status.HTTP_400_BAD_REQUEST
+        )
+
 
     # Crear la familia con el nombre proporcionado y un código único
     family = Family.objects.create(
@@ -336,42 +348,97 @@ def family_add_member(request, family_id):
 # Pet Views
 # En views.py, modifica las vistas de mascotas (pet_list) y posts (post_list):
 
-# En tu views.py de Django
 @api_view(['GET', 'POST'])
 @authentication_classes([JWTAuthentication])
 @permission_classes([IsAuthenticated])
 def pet_list(request):
     if request.method == 'GET':
-        # Obtener todos los miembros de la familia del usuario
-        family_members = User.objects.filter(families__members=request.user).values_list('id', flat=True)
-        # Filtrar mascotas que pertenecen al usuario o a miembros de su familia
-        pets = Pet.objects.filter(owner__in=[request.user.id] + list(family_members))
+        family = request.user.families.first()
+        if not family:
+            pets = Pet.objects.filter(owner=request.user)
+        else:
+            # Solo mascotas de la familia activa
+            pets = Pet.objects.filter(family=family)
+
         serializer = PetSerializer(pets, many=True, context={'request': request})
         return Response(serializer.data)
     
     elif request.method == 'POST':
+        # Verificar que el usuario pertenezca a una familia
+        user_families = request.user.families.all()
+        if not user_families.exists():
+            return Response(
+                {'error': 'Debes pertenecer a una familia para registrar mascotas'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+            
         serializer = PetSerializer(data=request.data, context={'request': request})
         if serializer.is_valid():
-            serializer.save(owner=request.user)
+            # Asignar el usuario actual como dueño y la familia
+            pet = serializer.save(owner=request.user)
+            
+            # Opcional: puedes asignar también la familia al modelo Pet si lo necesitas
+            # pet.family = user_families.first()
+            # pet.save()
+            
             return Response(serializer.data, status=status.HTTP_201_CREATED)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-    
-@api_view(['GET'])
+
+# views.py
+
+@api_view(['GET', 'POST'])
 @authentication_classes([JWTAuthentication])
 @permission_classes([IsAuthenticated])
 def post_list(request):
-    user_family = request.user.families.first()
+    if request.method == 'GET':
+        # Obtener posts del usuario y de su familia si existe
+        user_family = request.user.families.first()
+        
+        if user_family:
+            # Si tiene familia, obtener posts de todos los miembros
+            posts = Post.objects.filter(author__families=user_family).order_by('-created_at')
+        else:
+            # Si no tiene familia, solo sus posts
+            posts = Post.objects.filter(author=request.user).order_by('-created_at')
+        
+        serializer = PostSerializer(posts, many=True, context={'request': request})
+        return Response(serializer.data)
     
-    if user_family:
-        # Posts de miembros de la familia
-        posts = Post.objects.filter(author__families=user_family)
-    else:
-        # Solo posts del usuario
-        posts = Post.objects.filter(author=request.user)
-    
-    serializer = PostSerializer(posts, many=True)
-    return Response(serializer.data)
-    
+    elif request.method == 'POST':
+        # Preparamos los datos manualmente
+        data = {
+            'content': request.data.get('content'),
+            'post_type': request.data.get('post_type', 'UPDATE'),
+            'author': request.user.id  # Asignamos el autor
+        }
+        
+        serializer = PostSerializer(data=data, context={'request': request})
+        
+        if serializer.is_valid():
+            # Guardamos el post asignando el autor
+            post = serializer.save(author=request.user)
+            
+            # Manejo de la imagen si existe
+            if 'photo' in request.FILES:
+                try:
+                    PostImage.objects.create(
+                        post=post,
+                        author=request.user,
+                        photo=request.FILES['photo'],
+                        family=request.user.families.first() if request.user.families.exists() else None,
+                        pet=post.pet if hasattr(post, 'pet') else None
+                    )
+                except Exception as e:
+                    post.delete()  # Rollback si falla la imagen
+                    return Response(
+                        {'error': f'Error al subir imagen: {str(e)}'},
+                        status=status.HTTP_400_BAD_REQUEST
+                    )
+            
+            return Response(serializer.data, status=status.HTTP_201_CREATED)
+        
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
 @api_view(['GET', 'PUT', 'DELETE'])
 @authentication_classes([JWTAuthentication])
 @permission_classes([IsAuthenticated])

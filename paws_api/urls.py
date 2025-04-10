@@ -28,6 +28,7 @@ urlpatterns = [
     path('posts/', views.post_list, name='post_list'),
     path('posts/<int:post_id>/', views.post_detail, name='post_detail'),
     
+    
     # Reminder endpoints
     path('reminders/', views.reminder_list, name='reminder_list'),
     path('reminders/<int:reminder_id>/', views.reminder_detail, name='reminder_detail'),
@@ -50,4 +51,4 @@ urlpatterns = [
     path('photos/family/', views.family_photos, name='family_photos'),
     path('photos/pet/<int:pet_id>/', views.pet_photos, name='pet_photos'),
     path('families/setup/', views.setup_family, name='setup_family'),
-]
+] 
