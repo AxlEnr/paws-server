@@ -405,19 +405,24 @@ def post_list(request):
         return Response(serializer.data)
     
     elif request.method == 'POST':
+        pet_id = request.data.get('pet')  # 👈 Obtenemos el ID de la mascota
+
         # Preparamos los datos manualmente
         data = {
             'content': request.data.get('content'),
             'post_type': request.data.get('post_type', 'UPDATE'),
-            'author': request.user.id  # Asignamos el autor
+            'author': request.user.id
         }
-        
+
         serializer = PostSerializer(data=data, context={'request': request})
-        
+
         if serializer.is_valid():
-            # Guardamos el post asignando el autor
-            post = serializer.save(author=request.user)
-            
+            # Obtenemos la instancia de la mascota si fue enviada
+            pet = Pet.objects.filter(id=pet_id).first() if pet_id else None
+
+            # Guardamos el post incluyendo la mascota
+            post = serializer.save(author=request.user, pet=pet)
+
             # Manejo de la imagen si existe
             if 'photo' in request.FILES:
                 try:
@@ -426,18 +431,15 @@ def post_list(request):
                         author=request.user,
                         photo=request.FILES['photo'],
                         family=request.user.families.first() if request.user.families.exists() else None,
-                        pet=post.pet if hasattr(post, 'pet') else None
+                        pet=pet  # También se la asignamos aquí
                     )
                 except Exception as e:
-                    post.delete()  # Rollback si falla la imagen
-                    return Response(
-                        {'error': f'Error al subir imagen: {str(e)}'},
-                        status=status.HTTP_400_BAD_REQUEST
-                    )
-            
-            return Response(serializer.data, status=status.HTTP_201_CREATED)
-        
-        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+                    post.delete()
+                    return Response({'error': f'Error al subir imagen: {str(e)}'}, status=status.HTTP_400_BAD_REQUEST)
+
+            return Response(PostSerializer(post, context={'request': request}).data, status=status.HTTP_201_CREATED)
+
+    return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 @api_view(['GET', 'PUT', 'DELETE'])
 @authentication_classes([JWTAuthentication])
