@@ -26,6 +26,7 @@ class Family(models.Model):
     codeFam = models.CharField(max_length=10, default='No Code')
     creation_date = models.DateTimeField(default=timezone.now)
     
+    
     def __str__(self):
         return self.name
 
@@ -48,6 +49,15 @@ class Pet(models.Model):
     adoption_date = models.DateField(null=True)
     photo = models.ImageField(upload_to='pets/photos/', null=True, blank=True)  # Cambiado de URLField a ImageField
     vaccines = models.FileField(upload_to='pets/vaccines/', null=True, blank=True) 
+    family = models.ForeignKey(Family, on_delete=models.CASCADE, related_name='pets', null=True, blank=True)
+
+
+    def save(self, *args, **kwargs):
+        if not self.family and self.owner:
+            family = self.owner.families.first()
+            if family:
+                self.family = family
+        super().save(*args, **kwargs)
     
     def __str__(self):
         return f"{self.name} ({self.get_pet_type_display()})"

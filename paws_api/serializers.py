@@ -3,9 +3,15 @@ from .models import *
 from django.contrib.auth.hashers import make_password
 
 class UserSerializer(serializers.ModelSerializer):
+    family_id = serializers.SerializerMethodField()
+    
     class Meta:
         model = User
-        fields = ['id','email', 'password', 'first_name', 'last_name', 'phone', 'address']
+        fields = ['id', 'email', 'password', 'first_name', 'last_name', 'phone', 'address', 'family_id']
+    
+    def get_family_id(self, obj):
+        family = obj.families.first()
+        return family.id if family else None
     
     def create(self, validated_data):
         password = validated_data.pop('password')
@@ -29,7 +35,7 @@ class PetSerializer(serializers.ModelSerializer):
     class Meta:
         model = Pet
         fields = ['id', 'name', 'pet_type', 'pet_type_display', 'age', 'breed', 
-                 'adoption_date', 'photo', 'photo_url', 'vaccines', 'vaccines_url', 'owner']
+                 'adoption_date', 'photo', 'photo_url', 'vaccines', 'vaccines_url', 'owner', 'family']
         read_only_fields = ('owner', 'photo_url', 'vaccines_url', 'pet_type_display')
 
     def get_photo_url(self, obj):
@@ -97,11 +103,13 @@ class PostImageSerializer(serializers.ModelSerializer):
         return data
 
 class PostSerializer(serializers.ModelSerializer):
+    author = serializers.PrimaryKeyRelatedField(read_only=True)  # Esto es importante
     images = PostImageSerializer(many=True, read_only=True)
     
     class Meta:
         model = Post
         fields = ['id', 'author', 'content', 'created_at', 'post_type', 'status', 'images']
+        read_only_fields = ('author', 'created_at', 'status')
 
 class ReminderSerializer(serializers.ModelSerializer):
     class Meta:
