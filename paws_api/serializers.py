@@ -105,16 +105,17 @@ class PostImageSerializer(serializers.ModelSerializer):
 class PostSerializer(serializers.ModelSerializer):
     author = serializers.PrimaryKeyRelatedField(read_only=True)  # Esto es importante
     images = PostImageSerializer(many=True, read_only=True)
+    pet = PetSerializer(read_only=True)
     
     class Meta:
         model = Post
-        fields = ['id', 'author', 'content', 'created_at', 'post_type', 'status', 'images']
+        fields = ['id', 'author', 'content', 'created_at', 'post_type', 'status', 'images', 'pet']
         read_only_fields = ('author', 'created_at', 'status')
 
 class ReminderSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = Reminder
-        fields = ['id', 'user', 'pet', 'title', 'description', 'due_date', 'reminder_type', 'status']
+        class Meta:
+            model = Reminder
+            fields = ['id', 'user', 'pet', 'title', 'description', 'due_date', 'reminder_type', 'status']
 
 class NotificationSerializer(serializers.ModelSerializer):
     class Meta:
