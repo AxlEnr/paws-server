@@ -524,6 +524,14 @@ def post_detail(request, post_id):
 
 # Reminder Views
 
+
+from datetime import datetime
+from rest_framework import status
+from django.utils import timezone
+
+from django.utils import timezone
+from rest_framework import status
+
 @api_view(['GET', 'POST'])
 @authentication_classes([JWTAuthentication])
 @permission_classes([IsAuthenticated])
@@ -543,18 +551,22 @@ def reminder_list(request):
         data = request.data.copy()
         data['user'] = request.user.id
         
-        # Asignar familia si no hay asignación específica
-        if 'assigned_to' not in data or not data['assigned_to']:
-            family = request.user.families.first()
-            if family:
-                data['family'] = family.id
-        
+        # Validación directa con el serializer
         serializer = ReminderSerializer(data=data, context={'request': request})
+        
         if serializer.is_valid():
+            # Validación adicional de fecha/hora
+            due_date = serializer.validated_data.get('due_date')
+            if due_date and due_date < timezone.now():
+                return Response(
+                    {'error': 'No puedes crear recordatorios con fechas/horas pasadas'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            
             serializer.save()
             return Response(serializer.data, status=status.HTTP_201_CREATED)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-
+       
 @api_view(['GET', 'PUT', 'DELETE'])
 @authentication_classes([JWTAuthentication])
 @permission_classes([IsAuthenticated])

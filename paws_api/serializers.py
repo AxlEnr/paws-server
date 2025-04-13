@@ -164,11 +164,14 @@ class ReminderSerializer(serializers.ModelSerializer):
                 raise serializers.ValidationError(
                     {"recurrence_value": "El valor debe ser mayor a 0"}
                 )
-        
+            
+        due_date = data.get('due_date')
+        local_time = timezone.localtime(due_date)
+        now_local = timezone.localtime(timezone.now())
         # Validar fecha
-        if 'due_date' in data and data['due_date'] < timezone.now():
+        if local_time < now_local:
             raise serializers.ValidationError(
-                {"due_date": "La fecha no puede ser en el pasado"}
+                f"La hora debe ser futura (Ahora: {now_local.strftime('%H:%M')} | Ingresaste: {local_time.strftime('%H:%M')})"
             )
         
         return data
