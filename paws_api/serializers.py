@@ -113,9 +113,69 @@ class PostSerializer(serializers.ModelSerializer):
         read_only_fields = ('author', 'created_at', 'status')
 
 class ReminderSerializer(serializers.ModelSerializer):
-        class Meta:
-            model = Reminder
-            fields = ['id', 'user', 'pet', 'title', 'description', 'due_date', 'reminder_type', 'status']
+    assigned_to = serializers.PrimaryKeyRelatedField(
+        queryset=User.objects.all(), 
+        required=False, 
+        allow_null=True
+    )
+    pet = serializers.PrimaryKeyRelatedField(
+        queryset=Pet.objects.all(), 
+        required=False, 
+        allow_null=True
+    )
+    
+    class Meta:
+        model = Reminder
+        fields = '__all__'
+        read_only_fields = ('user', 'created_at', 'updated_at')
+
+    def validate(self, data):
+        user = self.context['request'].user
+        family = user.families.first()
+        
+        # Validar mascota
+        if 'pet' in data and data['pet']:
+            if data['pet'].owner != user and (not family or data['pet'].family != family):
+                raise serializers.ValidationError(
+                    {"pet": "No tienes permisos sobre esta mascota"}
+                )
+        
+        # Validar miembro de familia
+        if 'assigned_to' in data and data['assigned_to']:
+            if not family or not family.members.filter(id=data['assigned_to'].id).exists():
+                raise serializers.ValidationError(
+                    {"assigned_to": "Este usuario no pertenece a tu familia"}
+                )
+        
+        # Validar familia
+        if 'family' in data and data['family']:
+            if data['family'] != family:
+                raise serializers.ValidationError(
+                    {"family": "No tienes permisos sobre esta familia"}
+                )
+        
+        # Validar repetición
+        if data.get('is_recurring', False):
+            if not data.get('recurrence_type') or data['recurrence_type'] == 'NONE':
+                raise serializers.ValidationError(
+                    {"recurrence_type": "Debe seleccionar un tipo de repetición"}
+                )
+            if not data.get('recurrence_value') or data['recurrence_value'] < 1:
+                raise serializers.ValidationError(
+                    {"recurrence_value": "El valor debe ser mayor a 0"}
+                )
+        
+        # Validar fecha
+        if 'due_date' in data and data['due_date'] < timezone.now():
+            raise serializers.ValidationError(
+                {"due_date": "La fecha no puede ser en el pasado"}
+            )
+        
+        return data
+
+    def create(self, validated_data):
+        validated_data['user'] = self.context['request'].user
+        return super().create(validated_data)
 
 class NotificationSerializer(serializers.ModelSerializer):
     class Meta:

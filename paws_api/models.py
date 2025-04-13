@@ -120,29 +120,33 @@ class PostImage(models.Model):
         return f"Foto de {self.pet.name} subida por {self.author.first_name}"
 
 class Reminder(models.Model):
-    REMINDER_TYPES = [
-        ('HEALTH', 'Salud'),
-        ('ACTIVITY', 'Actividad'),
-        ('FOOD', 'Alimentación'),
-        ('OTHER', 'Otro'),
+    RECURRENCE_CHOICES = [
+        ('NONE', 'No repetir'),
+        ('DAILY', 'Diario'),
+        ('WEEKLY', 'Semanal'),
+        ('MONTHLY', 'Mensual'),
     ]
     
-    REMINDER_STATUS = [
-        ('PENDING', 'Pendiente'),
-        ('COMPLETED', 'Completado'),
-        ('CANCELLED', 'Cancelado'),
-    ]
-    
-    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='reminders')
-    pet = models.ForeignKey(Pet, on_delete=models.CASCADE, related_name='reminders')
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='created_reminders')
+    assigned_to = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, 
+                                 related_name='assigned_reminders')
+    family = models.ForeignKey('Family', on_delete=models.CASCADE, null=True, blank=True,
+                            related_name='family_reminders')  # Nuevo campo
+    pet = models.ForeignKey('Pet', on_delete=models.SET_NULL, null=True, blank=True)
     title = models.CharField(max_length=100)
     description = models.TextField()
-    due_date = models.DateTimeField(default=timezone.now)
-    reminder_type = models.CharField(max_length=10, choices=REMINDER_TYPES)
-    status = models.CharField(max_length=10, choices=REMINDER_STATUS, default='PENDING')
-    
+    due_date = models.DateTimeField()
+    is_recurring = models.BooleanField(default=False)
+    recurrence_type = models.CharField(max_length=10, choices=RECURRENCE_CHOICES, default='NONE')
+    recurrence_value = models.PositiveIntegerField(default=1)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
     def __str__(self):
-        return f"{self.title} for {self.pet.name}"
+        return f"{self.title} - {self.due_date.strftime('%Y-%m-%d %H:%M')}"
+
+    class Meta:
+        ordering = ['due_date']
 
 class Notification(models.Model):
     NOTIFICATION_TYPES = [

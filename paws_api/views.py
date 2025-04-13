@@ -13,6 +13,9 @@ from django.utils import timezone
 import logging
 from rest_framework.views import APIView
 from rest_framework.parsers import MultiPartParser, FormParser
+from django.db.models import Q
+
+
 
 # User Views
 @api_view(['GET', 'POST'])
@@ -520,21 +523,33 @@ def post_detail(request, post_id):
         return Response(status=status.HTTP_204_NO_CONTENT)
 
 # Reminder Views
+
 @api_view(['GET', 'POST'])
 @authentication_classes([JWTAuthentication])
 @permission_classes([IsAuthenticated])
 def reminder_list(request):
     if request.method == 'GET':
-        # Obtener recordatorios del usuario y de su familia
-        family_members = User.objects.filter(families__members=request.user).values_list('id', flat=True)
-        reminders = Reminder.objects.filter(user__in=[request.user.id] + list(family_members))
-        serializer = ReminderSerializer(reminders, many=True)
+        family = request.user.families.first()
+        reminders = Reminder.objects.filter(
+            Q(user=request.user) | 
+            Q(assigned_to=request.user) |
+            Q(family=family)
+        ).distinct().order_by('due_date')
+        
+        serializer = ReminderSerializer(reminders, many=True, context={'request': request})
         return Response(serializer.data)
     
     elif request.method == 'POST':
         data = request.data.copy()
         data['user'] = request.user.id
-        serializer = ReminderSerializer(data=data)
+        
+        # Asignar familia si no hay asignación específica
+        if 'assigned_to' not in data or not data['assigned_to']:
+            family = request.user.families.first()
+            if family:
+                data['family'] = family.id
+        
+        serializer = ReminderSerializer(data=data, context={'request': request})
         if serializer.is_valid():
             serializer.save()
             return Response(serializer.data, status=status.HTTP_201_CREATED)
@@ -544,16 +559,29 @@ def reminder_list(request):
 @authentication_classes([JWTAuthentication])
 @permission_classes([IsAuthenticated])
 def reminder_detail(request, reminder_id):
-    # Verificar que el recordatorio pertenezca al usuario o a su familia
-    family_members = User.objects.filter(families__members=request.user).values_list('id', flat=True)
-    reminder = get_object_or_404(Reminder, id=reminder_id, user__in=[request.user.id] + list(family_members))
+    # Verificar permisos
+    reminder = get_object_or_404(
+        Reminder.objects.filter(
+            Q(id=reminder_id) & (
+                Q(user=request.user) | 
+                Q(assigned_to=request.user) |
+                Q(user__families__members=request.user) |
+                Q(assigned_to__families__members=request.user)
+            )
+        )
+    )  
     
     if request.method == 'GET':
-        serializer = ReminderSerializer(reminder)
+        serializer = ReminderSerializer(reminder, context={'request': request})
         return Response(serializer.data)
     
     elif request.method == 'PUT':
-        serializer = ReminderSerializer(reminder, data=request.data, partial=True)
+        serializer = ReminderSerializer(
+            reminder, 
+            data=request.data, 
+            partial=True, 
+            context={'request': request}
+        )
         if serializer.is_valid():
             serializer.save()
             return Response(serializer.data)
@@ -562,6 +590,48 @@ def reminder_detail(request, reminder_id):
     elif request.method == 'DELETE':
         reminder.delete()
         return Response(status=status.HTTP_204_NO_CONTENT)
+
+@api_view(['GET'])
+@authentication_classes([JWTAuthentication])
+@permission_classes([IsAuthenticated])
+def reminder_options(request):
+    # Obtener opciones para los selectores
+    family = request.user.families.first()
+    all_members = family.members.all() if family else User.objects.none()
+    
+    # Crear lista de miembros incluyendo al usuario actual y opción "Todos"
+    members_list = [
+        {'id': request.user.id, 'name': f"Yo ({request.user.get_full_name()})"}
+    ]
+    
+    # Agregar opción "Todos"
+    members_list.append({'id': None, 'name': "Todos los miembros"})
+    
+    # Agregar otros miembros de la familia
+    for member in all_members.exclude(id=request.user.id):
+        members_list.append({
+            'id': member.id,
+            'name': member.get_full_name()
+        })
+    
+    # Obtener mascotas
+    pets = Pet.objects.filter(
+        Q(owner=request.user) |
+        Q(family__members=request.user)
+    ).distinct()
+    
+    pets_serializer = PetSerializer(pets, many=True, context={'request': request})
+    
+    return Response({
+        'family_members': members_list,
+        'pets': pets_serializer.data,
+        'recurrence_types': [
+            {'value': 'NONE', 'display': 'No repetir'},
+            {'value': 'DAILY', 'display': 'Diario'},
+            {'value': 'WEEKLY', 'display': 'Semanal'},
+            {'value': 'MONTHLY', 'display': 'Mensual'}
+        ]
+    })
 
 # Notification Views
 @api_view(['GET', 'POST'])
