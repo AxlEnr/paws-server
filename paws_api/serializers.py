@@ -127,7 +127,20 @@ class ReminderSerializer(serializers.ModelSerializer):
     class Meta:
         model = Reminder
         fields = '__all__'
-        read_only_fields = ('user', 'created_at', 'updated_at')
+        read_only_fields = (
+            'user', 
+            'created_at', 
+            'updated_at', 
+            'status', 
+            'completed_post',
+            'last_completed',
+            'next_due_date'
+        )
+
+    def get_status(self, obj):
+        if obj.status != 'COMPLETED' and obj.due_date < timezone.now():
+            return 'OVERDUE'
+        return obj.status
 
     def validate(self, data):
         user = self.context['request'].user

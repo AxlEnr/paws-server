@@ -33,6 +33,7 @@ urlpatterns = [
     path('reminders/', views.reminder_list, name='reminder_list'),
     path('reminders/<int:reminder_id>/', views.reminder_detail, name='reminder_detail'),
     path('reminders/options/', views.reminder_options, name='reminder_options'),
+    path('reminders/<int:reminder_id>/complete/', views.complete_reminder, name='complete_reminder'),
     
     # Notification endpoints
     path('notifications/', views.notification_list, name='notification_list'),

@@ -644,6 +644,82 @@ def reminder_options(request):
             {'value': 'MONTHLY', 'display': 'Mensual'}
         ]
     })
+from datetime import timedelta
+import calendar
+# views.py
+@api_view(['POST'])
+@authentication_classes([JWTAuthentication])
+@permission_classes([IsAuthenticated])
+def complete_reminder(request, reminder_id):
+    try:
+        reminder = Reminder.objects.get(
+            Q(id=reminder_id) & 
+            (Q(user=request.user) | Q(assigned_to=request.user))
+        )
+    except Reminder.DoesNotExist:
+        return Response(
+            {"error": "Recordatorio no encontrado o no tienes permisos"},
+            status=status.HTTP_404_NOT_FOUND
+        )
+
+    # Verificar si se envió una foto (opcional)
+    photo = request.FILES.get('photo')
+    
+    if photo:
+        # Crear el post asociado
+        post = Post.objects.create(
+            content=f"Completado recordatorio: {reminder.title}",
+            post_type="REMINDER",
+            author=request.user,
+            pet=reminder.pet
+        )
+        
+        # Guardar la imagen
+        PostImage.objects.create(
+            post=post,
+            author=request.user,
+            photo=photo,
+            family=request.user.families.first() if request.user.families.exists() else None,
+            pet=reminder.pet,
+            caption=f"Completado: {reminder.title}"
+        )
+        
+        reminder.completed_post = post
+        
+    reminder.status = 'COMPLETED'
+    reminder.last_completed = timezone.now()
+    # Actualizar el recordatorio
+    reminder.save()
+
+    return Response(
+        {"status": "success", "message": "Recordatorio completado correctamente"},
+        status=status.HTTP_200_OK
+    )
+def calculate_next_due_date(original_date, recurrence_type, recurrence_value):
+    next_date = original_date
+    
+    if recurrence_type == 'DAILY':
+        next_date += timedelta(days=recurrence_value)
+    elif recurrence_type == 'WEEKLY':
+        next_date += timedelta(weeks=recurrence_value)
+    elif recurrence_type == 'MONTHLY':
+        # Manejo simple de meses
+        year = next_date.year
+        month = next_date.month + recurrence_value
+        day = next_date.day
+        
+        # Ajustar año si pasamos de diciembre
+        if month > 12:
+            year += month // 12
+            month = month % 12
+        
+        # Asegurarnos de que el día no exceda los días del mes
+        max_day = calendar.monthrange(year, month)[1]
+        day = min(day, max_day)
+        
+        next_date = next_date.replace(year=year, month=month, day=day)
+    
+    return next_date
 
 # Notification Views
 @api_view(['GET', 'POST'])

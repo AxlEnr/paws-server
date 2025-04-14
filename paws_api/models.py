@@ -126,21 +126,46 @@ class Reminder(models.Model):
         ('WEEKLY', 'Semanal'),
         ('MONTHLY', 'Mensual'),
     ]
+    STATUS_CHOICES = [
+        ('PENDING', 'Pendiente'),
+        ('COMPLETED', 'Completado'),
+        ('OVERDUE', 'Vencido'),
+    ]
     
-    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='created_reminders')
+    RECURRENCE_CHOICES = [
+        ('NONE', 'No repetir'),
+        ('DAILY', 'Diario'),
+        ('WEEKLY', 'Semanal'),
+        ('MONTHLY', 'Mensual'),
+    ]
+    
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='created_reminders', null=True)
     assigned_to = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, 
                                  related_name='assigned_reminders')
     family = models.ForeignKey('Family', on_delete=models.CASCADE, null=True, blank=True,
                             related_name='family_reminders')  # Nuevo campo
     pet = models.ForeignKey('Pet', on_delete=models.SET_NULL, null=True, blank=True)
-    title = models.CharField(max_length=100)
-    description = models.TextField()
-    due_date = models.DateTimeField()
+    title = models.CharField(max_length=100, null=True)
+    description = models.TextField(null=True)
+    due_date = models.DateTimeField(null=True)
     is_recurring = models.BooleanField(default=False)
     recurrence_type = models.CharField(max_length=10, choices=RECURRENCE_CHOICES, default='NONE')
     recurrence_value = models.PositiveIntegerField(default=1)
-    created_at = models.DateTimeField(auto_now_add=True)
+    created_at = models.DateTimeField(auto_now_add=True, null=True)
     updated_at = models.DateTimeField(auto_now=True)
+    status = models.CharField(
+        max_length=10, 
+        choices=STATUS_CHOICES, 
+        default='PENDING'
+    )
+    completed_post = models.ForeignKey(
+        'Post', 
+        on_delete=models.SET_NULL, 
+        null=True, 
+        blank=True
+    )
+    last_completed = models.DateTimeField(null=True, blank=True)
+    next_due_date = models.DateTimeField(null=True, blank=True)
 
 
     def __str__(self):
