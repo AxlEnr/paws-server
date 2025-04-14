@@ -536,6 +536,7 @@ from rest_framework import status
 @authentication_classes([JWTAuthentication])
 @permission_classes([IsAuthenticated])
 def reminder_list(request):
+    
     if request.method == 'GET':
         family = request.user.families.first()
         reminders = Reminder.objects.filter(
@@ -550,6 +551,7 @@ def reminder_list(request):
     elif request.method == 'POST':
         data = request.data.copy()
         data['user'] = request.user.id
+        data['family'] = request.user.families.first().id 
         
         # Validación directa con el serializer
         serializer = ReminderSerializer(data=data, context={'request': request})
@@ -571,18 +573,32 @@ def reminder_list(request):
 @authentication_classes([JWTAuthentication])
 @permission_classes([IsAuthenticated])
 def reminder_detail(request, reminder_id):
-    # Verificar permisos
-    reminder = get_object_or_404(
+    # Verificar permisos con un filtro más estricto
+    try:
+        reminder = get_object_or_404(
         Reminder.objects.filter(
-            Q(id=reminder_id) & (
-                Q(user=request.user) | 
-                Q(assigned_to=request.user) |
-                Q(user__families__members=request.user) |
-                Q(assigned_to__families__members=request.user)
-            )
+            Q(user=request.user) | 
+            Q(assigned_to=request.user) |
+            Q(family__members=request.user)
+        ),
+        id=reminder_id
+    )
+    except Reminder.DoesNotExist:
+        return Response(
+            {"error": "Recordatorio no encontrado o no tienes permisos"},
+            status=status.HTTP_404_NOT_FOUND
         )
-    )  
-    
+    except Reminder.MultipleObjectsReturned:
+        # Si por alguna razón hay duplicados, toma el primero
+        reminder = get_object_or_404(
+        Reminder.objects.filter(
+            Q(user=request.user) | 
+            Q(assigned_to=request.user) |
+            Q(family__members=request.user)
+        ),
+        id=reminder_id
+    )
+
     if request.method == 'GET':
         serializer = ReminderSerializer(reminder, context={'request': request})
         return Response(serializer.data)
@@ -602,7 +618,6 @@ def reminder_detail(request, reminder_id):
     elif request.method == 'DELETE':
         reminder.delete()
         return Response(status=status.HTTP_204_NO_CONTENT)
-
 @api_view(['GET'])
 @authentication_classes([JWTAuthentication])
 @permission_classes([IsAuthenticated])
@@ -662,11 +677,14 @@ def complete_reminder(request, reminder_id):
             status=status.HTTP_404_NOT_FOUND
         )
 
-    # Verificar si se envió una foto (opcional)
+    if reminder.assigned_to and reminder.assigned_to != request.user and reminder.user != request.user:
+        return Response(
+            {"error": "No tienes permisos para completar este recordatorio"},
+            status=status.HTTP_403_FORBIDDEN
+        )
     photo = request.FILES.get('photo')
     
     if photo:
-        # Crear el post asociado
         post = Post.objects.create(
             content=f"Completado recordatorio: {reminder.title}",
             post_type="REMINDER",
@@ -685,10 +703,26 @@ def complete_reminder(request, reminder_id):
         )
         
         reminder.completed_post = post
-        
+    
+    # Crear notificaciones según la asignación
+    if reminder.assigned_to:
+        # Notificar solo al usuario asignado
+        Notification.objects.create(
+            user=reminder.assigned_to,
+            message=f"Recordatorio completado: {reminder.title}",
+            notification_type="REMINDER"
+        )
+    elif reminder.family:
+        # Notificar a todos los miembros de la familia
+        for member in reminder.family.members.all():
+            Notification.objects.create(
+                user=member,
+                message=f"Recordatorio completado: {reminder.title}",
+                notification_type="REMINDER"
+            )
+    
     reminder.status = 'COMPLETED'
     reminder.last_completed = timezone.now()
-    # Actualizar el recordatorio
     reminder.save()
 
     return Response(

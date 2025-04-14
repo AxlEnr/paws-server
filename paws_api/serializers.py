@@ -123,6 +123,11 @@ class ReminderSerializer(serializers.ModelSerializer):
         required=False, 
         allow_null=True
     )
+    family = serializers.PrimaryKeyRelatedField(
+        queryset=Family.objects.all(),
+        required=False,
+        allow_null=True
+    )
     
     class Meta:
         model = Reminder
