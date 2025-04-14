@@ -524,10 +524,19 @@ def post_detail(request, post_id):
 
 # Reminder Views
 
+
+from datetime import datetime
+from rest_framework import status
+from django.utils import timezone
+
+from django.utils import timezone
+from rest_framework import status
+
 @api_view(['GET', 'POST'])
 @authentication_classes([JWTAuthentication])
 @permission_classes([IsAuthenticated])
 def reminder_list(request):
+    
     if request.method == 'GET':
         family = request.user.families.first()
         reminders = Reminder.objects.filter(
@@ -542,35 +551,54 @@ def reminder_list(request):
     elif request.method == 'POST':
         data = request.data.copy()
         data['user'] = request.user.id
+        data['family'] = request.user.families.first().id 
         
-        # Asignar familia si no hay asignación específica
-        if 'assigned_to' not in data or not data['assigned_to']:
-            family = request.user.families.first()
-            if family:
-                data['family'] = family.id
-        
+        # Validación directa con el serializer
         serializer = ReminderSerializer(data=data, context={'request': request})
+        
         if serializer.is_valid():
+            # Validación adicional de fecha/hora
+            due_date = serializer.validated_data.get('due_date')
+            if due_date and due_date < timezone.now():
+                return Response(
+                    {'error': 'No puedes crear recordatorios con fechas/horas pasadas'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            
             serializer.save()
             return Response(serializer.data, status=status.HTTP_201_CREATED)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-
+       
 @api_view(['GET', 'PUT', 'DELETE'])
 @authentication_classes([JWTAuthentication])
 @permission_classes([IsAuthenticated])
 def reminder_detail(request, reminder_id):
-    # Verificar permisos
-    reminder = get_object_or_404(
+    # Verificar permisos con un filtro más estricto
+    try:
+        reminder = get_object_or_404(
         Reminder.objects.filter(
-            Q(id=reminder_id) & (
-                Q(user=request.user) | 
-                Q(assigned_to=request.user) |
-                Q(user__families__members=request.user) |
-                Q(assigned_to__families__members=request.user)
-            )
+            Q(user=request.user) | 
+            Q(assigned_to=request.user) |
+            Q(family__members=request.user)
+        ),
+        id=reminder_id
+    )
+    except Reminder.DoesNotExist:
+        return Response(
+            {"error": "Recordatorio no encontrado o no tienes permisos"},
+            status=status.HTTP_404_NOT_FOUND
         )
-    )  
-    
+    except Reminder.MultipleObjectsReturned:
+        # Si por alguna razón hay duplicados, toma el primero
+        reminder = get_object_or_404(
+        Reminder.objects.filter(
+            Q(user=request.user) | 
+            Q(assigned_to=request.user) |
+            Q(family__members=request.user)
+        ),
+        id=reminder_id
+    )
+
     if request.method == 'GET':
         serializer = ReminderSerializer(reminder, context={'request': request})
         return Response(serializer.data)
@@ -590,7 +618,6 @@ def reminder_detail(request, reminder_id):
     elif request.method == 'DELETE':
         reminder.delete()
         return Response(status=status.HTTP_204_NO_CONTENT)
-
 @api_view(['GET'])
 @authentication_classes([JWTAuthentication])
 @permission_classes([IsAuthenticated])
@@ -632,6 +659,101 @@ def reminder_options(request):
             {'value': 'MONTHLY', 'display': 'Mensual'}
         ]
     })
+from datetime import timedelta
+import calendar
+# views.py
+@api_view(['POST'])
+@authentication_classes([JWTAuthentication])
+@permission_classes([IsAuthenticated])
+def complete_reminder(request, reminder_id):
+    try:
+        reminder = Reminder.objects.get(
+            Q(id=reminder_id) & 
+            (Q(user=request.user) | Q(assigned_to=request.user))
+        )
+    except Reminder.DoesNotExist:
+        return Response(
+            {"error": "Recordatorio no encontrado o no tienes permisos"},
+            status=status.HTTP_404_NOT_FOUND
+        )
+
+    if reminder.assigned_to and reminder.assigned_to != request.user and reminder.user != request.user:
+        return Response(
+            {"error": "No tienes permisos para completar este recordatorio"},
+            status=status.HTTP_403_FORBIDDEN
+        )
+    photo = request.FILES.get('photo')
+    
+    if photo:
+        post = Post.objects.create(
+            content=f"Completado recordatorio: {reminder.title}",
+            post_type="REMINDER",
+            author=request.user,
+            pet=reminder.pet
+        )
+        
+        # Guardar la imagen
+        PostImage.objects.create(
+            post=post,
+            author=request.user,
+            photo=photo,
+            family=request.user.families.first() if request.user.families.exists() else None,
+            pet=reminder.pet,
+            caption=f"Completado: {reminder.title}"
+        )
+        
+        reminder.completed_post = post
+    
+    # Crear notificaciones según la asignación
+    if reminder.assigned_to:
+        # Notificar solo al usuario asignado
+        Notification.objects.create(
+            user=reminder.assigned_to,
+            message=f"Recordatorio completado: {reminder.title}",
+            notification_type="REMINDER"
+        )
+    elif reminder.family:
+        # Notificar a todos los miembros de la familia
+        for member in reminder.family.members.all():
+            Notification.objects.create(
+                user=member,
+                message=f"Recordatorio completado: {reminder.title}",
+                notification_type="REMINDER"
+            )
+    
+    reminder.status = 'COMPLETED'
+    reminder.last_completed = timezone.now()
+    reminder.save()
+
+    return Response(
+        {"status": "success", "message": "Recordatorio completado correctamente"},
+        status=status.HTTP_200_OK
+    )
+def calculate_next_due_date(original_date, recurrence_type, recurrence_value):
+    next_date = original_date
+    
+    if recurrence_type == 'DAILY':
+        next_date += timedelta(days=recurrence_value)
+    elif recurrence_type == 'WEEKLY':
+        next_date += timedelta(weeks=recurrence_value)
+    elif recurrence_type == 'MONTHLY':
+        # Manejo simple de meses
+        year = next_date.year
+        month = next_date.month + recurrence_value
+        day = next_date.day
+        
+        # Ajustar año si pasamos de diciembre
+        if month > 12:
+            year += month // 12
+            month = month % 12
+        
+        # Asegurarnos de que el día no exceda los días del mes
+        max_day = calendar.monthrange(year, month)[1]
+        day = min(day, max_day)
+        
+        next_date = next_date.replace(year=year, month=month, day=day)
+    
+    return next_date
 
 # Notification Views
 @api_view(['GET', 'POST'])

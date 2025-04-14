@@ -123,11 +123,29 @@ class ReminderSerializer(serializers.ModelSerializer):
         required=False, 
         allow_null=True
     )
+    family = serializers.PrimaryKeyRelatedField(
+        queryset=Family.objects.all(),
+        required=False,
+        allow_null=True
+    )
     
     class Meta:
         model = Reminder
         fields = '__all__'
-        read_only_fields = ('user', 'created_at', 'updated_at')
+        read_only_fields = (
+            'user', 
+            'created_at', 
+            'updated_at', 
+            'status', 
+            'completed_post',
+            'last_completed',
+            'next_due_date'
+        )
+
+    def get_status(self, obj):
+        if obj.status != 'COMPLETED' and obj.due_date < timezone.now():
+            return 'OVERDUE'
+        return obj.status
 
     def validate(self, data):
         user = self.context['request'].user
@@ -164,11 +182,14 @@ class ReminderSerializer(serializers.ModelSerializer):
                 raise serializers.ValidationError(
                     {"recurrence_value": "El valor debe ser mayor a 0"}
                 )
-        
+            
+        due_date = data.get('due_date')
+        local_time = timezone.localtime(due_date)
+        now_local = timezone.localtime(timezone.now())
         # Validar fecha
-        if 'due_date' in data and data['due_date'] < timezone.now():
+        if local_time < now_local:
             raise serializers.ValidationError(
-                {"due_date": "La fecha no puede ser en el pasado"}
+                f"La hora debe ser futura (Ahora: {now_local.strftime('%H:%M')} | Ingresaste: {local_time.strftime('%H:%M')})"
             )
         
         return data
